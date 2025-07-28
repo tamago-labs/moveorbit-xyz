@@ -1,6 +1,6 @@
 "use client"
 
-import { Gem, Menu, X, Orbit } from "lucide-react"
+import { Gem, Menu, X,  SquareMousePointer } from "lucide-react"
 import Link from "next/link"
 import { motion } from 'framer-motion'
 import { usePathname } from 'next/navigation'
@@ -27,7 +27,7 @@ const Header = () => {
                         <div className="relative flex items-center justify-center w-10 h-10 md:w-12 md:h-12">
                             <div className="absolute inset-0 bg-blue-500/20 rounded-xl blur-sm group-hover:bg-blue-500/30 transition-all duration-300"></div>
                             <div className="relative flex items-center justify-center w-8 h-8 md:w-10 md:h-10 rounded-xl bg-gradient-to-br from-blue-600 via-purple-600 to-blue-800 shadow-lg shadow-blue-500/25">
-                                <Orbit className="w-4 h-4 md:w-5 md:h-5 text-white font-bold" strokeWidth={2.5} /> 
+                                <SquareMousePointer className="w-4 h-4 md:w-5 md:h-5 text-white font-bold" strokeWidth={2.5} />                      
                             </div>
                         </div>
                         <div className="flex flex-col">

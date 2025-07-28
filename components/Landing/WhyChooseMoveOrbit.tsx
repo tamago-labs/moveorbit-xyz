@@ -33,7 +33,7 @@ const WhyChooseMoveOrbit = () => {
   ];
 
   return (
-    <div className="w-full py-20" style={{ fontFamily: 'Sora, sans-serif' }}>
+    <div className="w-full py-20" >
       <div className="max-w-6xl mx-auto px-4 md:px-10">
         {/* Header */}
         <motion.div
@@ -152,7 +152,7 @@ const WhyChooseMoveOrbit = () => {
         </motion.div>
 
         {/* Bottom CTA */}
-        <motion.div
+        {/* <motion.div
           className="text-center mt-16"
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -170,7 +170,7 @@ const WhyChooseMoveOrbit = () => {
               Start Trading Now
             </button>
           </div>
-        </motion.div>
+        </motion.div> */}
       </div>
     </div>
   );

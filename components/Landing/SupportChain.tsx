@@ -18,7 +18,7 @@ const SupportedChainsSection = () => {
   ];
 
   return (
-    <div className="w-full py-16" style={{ fontFamily: 'Sora, sans-serif' }}>
+    <div className="w-full py-16" >
       <div className="max-w-6xl mx-auto px-4 md:px-10">
         {/* Header */}
         <motion.div

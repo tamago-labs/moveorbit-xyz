@@ -27,7 +27,7 @@ const GetStartedCTA = () => {
     ];
 
     return (
-        <div className="w-full py-24  " >
+        <div className="w-full py-24 pt-0 " >
             <div className="max-w-4xl mx-auto px-4 md:px-10">
                 {/* Main CTA */}
                 <motion.div
@@ -37,16 +37,13 @@ const GetStartedCTA = () => {
                     transition={{ duration: 0.6 }}
                     viewport={{ once: true }}
                 >
-                    <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">
-                        Start Your First
-                        <br />
-                        Cross-Chain Swap
+                    <h2 className="text-3xl md:text-4xl font-bold text-white mb-6 leading-tight">
+                        Start Your First Swap 
                     </h2>
-                    <p className="text-slate-400 text-lg md:text-xl mb-8 max-w-2xl mx-auto leading-relaxed">
+                    <p className="text-slate-400 text-base md:text-lg mb-8 max-w-2xl mx-auto leading-relaxed">
                         Experience seamless asset bridging between EVM and Move ecosystems with enterprise-grade security and lightning-fast settlements.
                     </p>
-
-                    {/* Primary CTA Button */}
+ 
                     <motion.button
                         className="group inline-flex items-center gap-3 px-8 py-4 bg-white text-slate-900 font-semibold rounded-lg hover:bg-slate-100 transition-all duration-300 mb-4"
                         whileHover={{ scale: 1.02 }}
@@ -93,36 +90,10 @@ const GetStartedCTA = () => {
                     ))}
                 </motion.div>
 
-                {/* Bottom Stats */}
-                <motion.div
-                    className="mt-16 pt-12 border-t border-slate-800/50"
-                    initial={{ opacity: 0 }}
-                    whileInView={{ opacity: 1 }}
-                    transition={{ duration: 0.6, delay: 0.5 }}
-                    viewport={{ once: true }}
-                >
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-                        <div>
-                            <div className="text-2xl md:text-3xl font-bold text-white mb-1">$50M+</div>
-                            <div className="text-slate-400 text-sm">Total Volume</div>
-                        </div>
-                        <div>
-                            <div className="text-2xl md:text-3xl font-bold text-white mb-1">15K+</div>
-                            <div className="text-slate-400 text-sm">Successful Swaps</div>
-                        </div>
-                        <div>
-                            <div className="text-2xl md:text-3xl font-bold text-white mb-1">9+</div>
-                            <div className="text-slate-400 text-sm">Networks</div>
-                        </div>
-                        <div>
-                            <div className="text-2xl md:text-3xl font-bold text-white mb-1">99.9%</div>
-                            <div className="text-slate-400 text-sm">Uptime</div>
-                        </div>
-                    </div>
-                </motion.div>
+                
 
                 {/* Security Notice */}
-                <motion.div
+                {/* <motion.div
                     className="mt-12 bg-slate-800/20 backdrop-blur-sm rounded-lg border border-slate-700/30 p-6"
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
@@ -148,7 +119,7 @@ const GetStartedCTA = () => {
                             </div>
                         </div>
                     </div>
-                </motion.div>
+                </motion.div> */}
             </div>
         </div>
     );

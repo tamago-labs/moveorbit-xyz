@@ -14,7 +14,7 @@ const Footer = () => {
                 <div className=" mt-6  flex flex-col md:flex-row justify-between items-center gap-4">
                     <div className="flex gap-6">
                         <span className="text-slate-500 text-sm text-center md:text-left">
-                            Made with ❤️ during ETHGlobal United DeFi
+                            Made with ❤️ during ETHGlobal Unite DeFi
                         </span> 
                     </div>
 

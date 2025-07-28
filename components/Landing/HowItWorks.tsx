@@ -44,7 +44,7 @@ const HowItWorksSection = () => {
   ];
 
   return (
-    <div className="w-full py-20" style={{ fontFamily: 'Sora, sans-serif' }}>
+    <div className="w-full py-20" >
       <div className="max-w-6xl mx-auto px-4 md:px-10">
         {/* Header */}
         <motion.div
@@ -174,7 +174,7 @@ const HowItWorksSection = () => {
         </div>
 
         {/* Bottom Stats */}
-        <motion.div
+        {/* <motion.div
           className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6 text-center"
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -193,7 +193,7 @@ const HowItWorksSection = () => {
             <div className="text-2xl font-bold text-white mb-1">$0</div>
             <div className="text-slate-400 text-sm">Failed Transactions</div>
           </div>
-        </motion.div>
+        </motion.div> */}
       </div>
     </div>
   );
