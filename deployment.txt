@@ -1,0 +1,15 @@
+Ethereum Sepolia
+================================================
+
+MockUSDC: 0xAF4E836b7a1f20F1519cc82529Db54c62b02E93c 
+
+
+Avalanche Fuji
+================================================
+
+MockUSDC: 0x959C3Bcf9AedF4c22061d8f935C477D9E47f02CA 
+
+Arbitrum Sepolia
+================================================
+
+MockUSDC: 0x5F7392Ec616F829Ab54092e7F167F518835Ac740
