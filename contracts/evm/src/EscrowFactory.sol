@@ -7,14 +7,12 @@ import { BaseExtension } from "limit-order-settlement/contracts/extensions/BaseE
 import { MultiVMResolverExtension } from "./extensions/MultiVMResolverExtension.sol";
 
 import { ProxyHashLib } from "cross-chain-swap/libraries/ProxyHashLib.sol";
-import { BaseEscrowFactory } from "cross-chain-swap/BaseEscrowFactory.sol";
 import { EscrowDst } from "cross-chain-swap/EscrowDst.sol";
 import { EscrowSrc } from "cross-chain-swap/EscrowSrc.sol";
 import { MerkleStorageInvalidator } from "cross-chain-swap/MerkleStorageInvalidator.sol";
 
 import { Address, AddressLib } from "solidity-utils/contracts/libraries/AddressLib.sol";
 import { Clones } from "openzeppelin-contracts/contracts/proxy/Clones.sol";
-import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Create2 } from "openzeppelin-contracts/contracts/utils/Create2.sol";
 import { SafeERC20 } from "solidity-utils/contracts/libraries/SafeERC20.sol";
 
@@ -22,14 +20,14 @@ import { ImmutablesLib } from "cross-chain-swap/libraries/ImmutablesLib.sol";
 import { Timelocks, TimelocksLib } from "cross-chain-swap/libraries/TimelocksLib.sol";
 import { IEscrowFactory } from "cross-chain-swap/interfaces/IEscrowFactory.sol";
 import { IBaseEscrow } from "cross-chain-swap/interfaces/IBaseEscrow.sol";
-
+import { SRC_IMMUTABLES_LENGTH } from "cross-chain-swap/EscrowFactoryContext.sol";
+import { MakerTraitsLib } from "limit-order-protocol/contracts/libraries/MakerTraitsLib.sol";
 
 /**
  * @title Escrow Factory with Multi-VM Support
  * @notice Contract to create escrow contracts for cross-chain atomic swap with multi-VM resolver support
  */
-
-contract EscrowFactory is  BaseExtension, MultiVMResolverExtension, MerkleStorageInvalidator {
+contract EscrowFactory is IEscrowFactory, BaseExtension, MultiVMResolverExtension, MerkleStorageInvalidator {
 
     using AddressLib for Address;
     using Clones for address;
@@ -62,8 +60,8 @@ contract EscrowFactory is  BaseExtension, MultiVMResolverExtension, MerkleStorag
     }
 
     /**
-     * @notice Post-interaction that handles both validation and multi-VM tracking
-     * @dev Resolves diamond inheritance by explicitly calling both parent implementations
+     * @notice Post-interaction that handles escrow creation and multi-VM tracking
+     * @dev Implements core escrow factory logic plus multi-VM extensions
      */
     function _postInteraction(
         IOrderMixin.Order calldata order,
@@ -75,16 +73,156 @@ contract EscrowFactory is  BaseExtension, MultiVMResolverExtension, MerkleStorag
         uint256 remainingMakingAmount,
         bytes calldata extraData
     ) internal override(BaseExtension, MultiVMResolverExtension) {
-        // First, call the MultiVMResolverExtension implementation
-        // This handles cross-VM order creation and tracking
+        // First handle MultiVM tracking
         MultiVMResolverExtension._postInteraction(
             order, extension, orderHash, taker, makingAmount, takingAmount, remainingMakingAmount, extraData
         );
-        
-        // Note: MultiVMResolverExtension._postInteraction already calls 
-        // super._postInteraction(), which will invoke BaseExtension._postInteraction()
-        // So we don't need to call BaseExtension._postInteraction() explicitly here
-        // to avoid double execution
+
+        // Then handle core escrow creation logic
+        _handleEscrowCreation(order, orderHash, taker, makingAmount, takingAmount, remainingMakingAmount, extraData);
     }
 
+    /**
+     * @notice Core escrow creation logic extracted from BaseEscrowFactory
+     */
+    function _handleEscrowCreation(
+        IOrderMixin.Order calldata order,
+        bytes32 orderHash,
+        address taker,
+        uint256 makingAmount,
+        uint256 takingAmount,
+        uint256 remainingMakingAmount,
+        bytes calldata extraData
+    ) internal {
+        // Parse extraData to get escrow parameters
+        uint256 superArgsLength = extraData.length - SRC_IMMUTABLES_LENGTH;
+        
+        ExtraDataArgs calldata extraDataArgs;
+        assembly ("memory-safe") {
+            extraDataArgs := add(extraData.offset, superArgsLength)
+        }
+
+        bytes32 hashlock;
+
+        // Handle multiple fills if enabled
+        if (MakerTraitsLib.allowMultipleFills(order.makerTraits)) {
+            uint256 partsAmount = uint256(extraDataArgs.hashlockInfo) >> 240;
+            if (partsAmount < 2) revert InvalidSecretsAmount();
+            bytes32 key = keccak256(abi.encodePacked(orderHash, uint240(uint256(extraDataArgs.hashlockInfo))));
+            ValidationData memory validated = lastValidated[key];
+            hashlock = validated.leaf;
+            if (!_isValidPartialFill(makingAmount, remainingMakingAmount, order.makingAmount, partsAmount, validated.index)) {
+                revert InvalidPartialFill();
+            }
+        } else {
+            hashlock = extraDataArgs.hashlockInfo;
+        }
+
+        // Create immutables for source escrow
+        IBaseEscrow.Immutables memory immutables = IBaseEscrow.Immutables({
+            orderHash: orderHash,
+            hashlock: hashlock,
+            maker: order.maker,
+            taker: Address.wrap(uint160(taker)),
+            token: order.makerAsset,
+            amount: makingAmount,
+            safetyDeposit: extraDataArgs.deposits >> 128,
+            timelocks: extraDataArgs.timelocks.setDeployedAt(block.timestamp)
+        });
+
+        DstImmutablesComplement memory immutablesComplement = DstImmutablesComplement({
+            maker: order.receiver.get() == address(0) ? order.maker : order.receiver,
+            amount: takingAmount,
+            token: extraDataArgs.dstToken,
+            safetyDeposit: extraDataArgs.deposits & type(uint128).max,
+            chainId: extraDataArgs.dstChainId
+        });
+
+        emit SrcEscrowCreated(immutables, immutablesComplement);
+
+        // Deploy the source escrow
+        bytes32 salt = immutables.hashMem();
+        address escrow = _deployEscrow(salt, 0, ESCROW_SRC_IMPLEMENTATION);
+        
+        // Validate escrow has sufficient balance
+        if (escrow.balance < immutables.safetyDeposit || IERC20(order.makerAsset.get()).balanceOf(escrow) < makingAmount) {
+            revert InsufficientEscrowBalance();
+        }
+    }
+
+    /**
+     * @notice See {IEscrowFactory-createDstEscrow}.
+     */
+    function createDstEscrow(IBaseEscrow.Immutables calldata dstImmutables, uint256 srcCancellationTimestamp) external payable {
+        address token = dstImmutables.token.get();
+        uint256 nativeAmount = dstImmutables.safetyDeposit;
+        if (token == address(0)) {
+            nativeAmount += dstImmutables.amount;
+        }
+        if (msg.value != nativeAmount) revert InsufficientEscrowBalance();
+
+        IBaseEscrow.Immutables memory immutables = dstImmutables;
+        immutables.timelocks = immutables.timelocks.setDeployedAt(block.timestamp);
+        
+        // Check that the escrow cancellation will start not later than the cancellation time on the source chain.
+        if (immutables.timelocks.get(TimelocksLib.Stage.DstCancellation) > srcCancellationTimestamp) revert InvalidCreationTime();
+
+        bytes32 salt = immutables.hashMem();
+        address escrow = _deployEscrow(salt, msg.value, ESCROW_DST_IMPLEMENTATION);
+        if (token != address(0)) {
+            IERC20(token).safeTransferFrom(msg.sender, escrow, immutables.amount);
+        }
+
+        emit DstEscrowCreated(escrow, dstImmutables.hashlock, dstImmutables.taker);
+    }
+
+    /**
+     * @notice See {IEscrowFactory-addressOfEscrowSrc}.
+     */
+    function addressOfEscrowSrc(IBaseEscrow.Immutables calldata immutables) external view virtual returns (address) {
+        return Create2.computeAddress(immutables.hash(), _PROXY_SRC_BYTECODE_HASH);
+    }
+
+    /**
+     * @notice See {IEscrowFactory-addressOfEscrowDst}.
+     */
+    function addressOfEscrowDst(IBaseEscrow.Immutables calldata immutables) external view virtual returns (address) {
+        return Create2.computeAddress(immutables.hash(), _PROXY_DST_BYTECODE_HASH);
+    }
+
+    /**
+     * @notice Deploys a new escrow contract.
+     * @param salt The salt for the deterministic address computation.
+     * @param value The value to be sent to the escrow contract.
+     * @param implementation Address of the implementation.
+     * @return escrow The address of the deployed escrow contract.
+     */
+    function _deployEscrow(bytes32 salt, uint256 value, address implementation) internal virtual returns (address escrow) {
+        escrow = implementation.cloneDeterministic(salt, value);
+    }
+
+    /**
+     * @notice Validates partial fill logic for multiple fills
+     */
+    function _isValidPartialFill(
+        uint256 makingAmount,
+        uint256 remainingMakingAmount,
+        uint256 orderMakingAmount,
+        uint256 partsAmount,
+        uint256 validatedIndex
+    ) internal pure returns (bool) {
+        uint256 calculatedIndex = (orderMakingAmount - remainingMakingAmount + makingAmount - 1) * partsAmount / orderMakingAmount;
+
+        if (remainingMakingAmount == makingAmount) {
+            // If the order is filled to completion, a secret with index i + 1 must be used
+            // where i is the index of the secret for the last part.
+            return (calculatedIndex + 2 == validatedIndex);
+        } else if (orderMakingAmount != remainingMakingAmount) {
+            // Calculate the previous fill index only if this is not the first fill.
+            uint256 prevCalculatedIndex = (orderMakingAmount - remainingMakingAmount - 1) * partsAmount / orderMakingAmount;
+            if (calculatedIndex == prevCalculatedIndex) return false;
+        }
+
+        return calculatedIndex + 1 == validatedIndex;
+    }
 }
