@@ -1,30 +1,28 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.20;
+pragma solidity 0.8.23;
 
 /**
  * @dev Timelocks for the source and the destination chains plus the deployment timestamp.
- * Timelocks store the number of seconds from the time the contract is deployed to the start of a specific period.
  * For illustrative purposes, it is possible to describe timelocks by two structures:
  * struct SrcTimelocks {
+ *     uint256 finality;
  *     uint256 withdrawal;
- *     uint256 publicWithdrawal;
  *     uint256 cancellation;
- *     uint256 publicCancellation;
  * }
  *
  * struct DstTimelocks {
+ *     uint256 finality;
  *     uint256 withdrawal;
  *     uint256 publicWithdrawal;
- *     uint256 cancellation;
  * }
  *
- * withdrawal: Period when only the taker with a secret can withdraw tokens for taker (source chain) or maker (destination chain).
- * publicWithdrawal: Period when anyone with a secret can withdraw tokens for taker (source chain) or maker (destination chain).
- * cancellation: Period when escrow can only be cancelled by the taker.
- * publicCancellation: Period when escrow can be cancelled by anyone.
- *
- * @custom:security-contact security@1inch.io
+ * finality: The duration of the chain finality period.
+ * withdrawal: The duration of the period when only the taker with a secret can withdraw tokens for taker (source chain)
+ * or maker (destination chain).
+ * publicWithdrawal: The duration of the period when anyone with a secret can withdraw tokens for taker (source chain)
+ * or maker (destination chain).
+ * cancellation: The duration of the period when escrow can only be cancelled by the taker.
  */
 type Timelocks is uint256;
 
@@ -32,18 +30,14 @@ type Timelocks is uint256;
  * @title Timelocks library for compact storage of timelocks in a uint256.
  */
 library TimelocksLib {
-    enum Stage {
-        SrcWithdrawal,
-        SrcPublicWithdrawal,
-        SrcCancellation,
-        SrcPublicCancellation,
-        DstWithdrawal,
-        DstPublicWithdrawal,
-        DstCancellation
-    }
-
-    uint256 private constant _DEPLOYED_AT_MASK = 0xffffffff00000000000000000000000000000000000000000000000000000000;
-    uint256 private constant _DEPLOYED_AT_OFFSET = 224;
+    uint256 internal constant _TIMELOCK_MASK = type(uint32).max;
+    // 6 variables 32 bits each
+    uint256 internal constant _SRC_FINALITY_OFFSET = 224;
+    uint256 internal constant _SRC_WITHDRAWAL_OFFSET = 192;
+    uint256 internal constant _SRC_CANCELLATION_OFFSET = 160;
+    uint256 internal constant _DST_FINALITY_OFFSET = 128;
+    uint256 internal constant _DST_WITHDRAWAL_OFFSET = 96;
+    uint256 internal constant _DST_PUB_WITHDRAWAL_OFFSET = 64;
 
     /**
      * @notice Sets the Escrow deployment timestamp.
@@ -52,7 +46,7 @@ library TimelocksLib {
      * @return The timelocks with the deployment timestamp set.
      */
     function setDeployedAt(Timelocks timelocks, uint256 value) internal pure returns (Timelocks) {
-        return Timelocks.wrap((Timelocks.unwrap(timelocks) & ~uint256(_DEPLOYED_AT_MASK)) | value << _DEPLOYED_AT_OFFSET);
+        return Timelocks.wrap((Timelocks.unwrap(timelocks) & ~uint256(type(uint32).max)) | uint32(value));
     }
 
     /**
@@ -62,20 +56,72 @@ library TimelocksLib {
      */
     function rescueStart(Timelocks timelocks, uint256 rescueDelay) internal pure returns (uint256) {
         unchecked {
-            return rescueDelay + (Timelocks.unwrap(timelocks) >> _DEPLOYED_AT_OFFSET);
+            return uint32(Timelocks.unwrap(timelocks)) + rescueDelay;
         }
     }
 
+    // ----- Source chain timelocks ----- //
+
     /**
-     * @notice Returns the timelock value for the given stage.
-     * @param timelocks The timelocks to get the value from.
-     * @param stage The stage to get the value for.
-     * @return The timelock value for the given stage.
+     * @notice Returns the start of the private withdrawal period on the source chain.
+     * @param timelocks The timelocks to get the finality duration from.
+     * @return The start of the private withdrawal period.
      */
-    function get(Timelocks timelocks, Stage stage) internal pure returns (uint256) {
-        uint256 data = Timelocks.unwrap(timelocks);
-        uint256 bitShift = uint256(stage) * 32;
-        // The maximum uint32 value will be reached in 2106.
-        return (data >> _DEPLOYED_AT_OFFSET) + uint32(data >> bitShift);
+    function srcWithdrawalStart(Timelocks timelocks) internal pure returns (uint256) {
+        return _get(timelocks, _SRC_FINALITY_OFFSET);
+    }
+
+    /**
+     * @notice Returns the start of the private cancellation period on the source chain.
+     * @param timelocks The timelocks to get the private withdrawal duration from.
+     * @return The start of the private cancellation period.
+     */
+    function srcCancellationStart(Timelocks timelocks) internal pure returns (uint256) {
+        return _get(timelocks, _SRC_WITHDRAWAL_OFFSET);
+    }
+
+    /**
+     * @notice Returns the start of the public cancellation period on the source chain.
+     * @param timelocks The timelocks to get the private cancellation duration from.
+     * @return The start of the public cancellation period.
+     */
+    function srcPubCancellationStart(Timelocks timelocks) internal pure returns (uint256) {
+        return _get(timelocks, _SRC_CANCELLATION_OFFSET);
+    }
+
+    // ----- Destination chain timelocks ----- //
+
+    /**
+     * @notice Returns the start of the private withdrawal period on the destination chain.
+     * @param timelocks The timelocks to get the finality duration from.
+     * @return The start of the private withdrawal period.
+     */
+    function dstWithdrawalStart(Timelocks timelocks) internal pure returns (uint256) {
+        return _get(timelocks, _DST_FINALITY_OFFSET);
+    }
+
+    /**
+     * @notice Returns the start of the public withdrawal period on the destination chain.
+     * @param timelocks The timelocks to get the private withdrawal duration from.
+     * @return The start of the public withdrawal period.
+     */
+    function dstPubWithdrawalStart(Timelocks timelocks) internal pure returns (uint256) {
+        return _get(timelocks, _DST_WITHDRAWAL_OFFSET);
+    }
+
+    /**
+     * @notice Returns the start of the private cancellation period on the destination chain.
+     * @param timelocks The timelocks to get the public withdrawal duration from.
+     * @return The start of the private cancellation period.
+     */
+    function dstCancellationStart(Timelocks timelocks) internal pure returns (uint256) {
+        return _get(timelocks, _DST_PUB_WITHDRAWAL_OFFSET);
+    }
+
+    function _get(Timelocks timelocks, uint256 offset) private pure returns (uint256) {
+        unchecked {
+            uint256 data = Timelocks.unwrap(timelocks);
+            return (data + (data >> offset)) & _TIMELOCK_MASK;
+        }
     }
 }
