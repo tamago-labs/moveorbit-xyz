@@ -3,7 +3,7 @@ pragma solidity 0.8.23;
 
 import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IOrderMixin } from "limit-order-protocol/contracts/interfaces/IOrderMixin.sol";
-import { BaseExtension } from "limit-order-settlement/contracts/extensions/BaseExtension.sol";
+import { BaseExtension } from "./extensions/BaseExtension.sol";
 import { MultiVMResolverExtension } from "./extensions/MultiVMResolverExtension.sol";
 
 import { ProxyHashLib } from "cross-chain-swap/libraries/ProxyHashLib.sol";
@@ -60,8 +60,14 @@ contract EscrowFactory is IEscrowFactory, BaseExtension, MultiVMResolverExtensio
     }
 
     /**
-     * @notice Post-interaction that handles escrow creation and multi-VM tracking
-     * @dev Implements core escrow factory logic plus multi-VM extensions
+     * @notice Creates a new escrow contract for maker on the source chain.
+     * @dev The caller must be whitelisted and pre-send the safety deposit in a native token
+     * to a pre-computed deterministic address of the created escrow.
+     * The external postInteraction function call will be made from the Limit Order Protocol
+     * after all funds have been transferred. See {IPostInteraction-postInteraction}.
+     * `extraData` consists of:
+     *   - MultiVM extension data (handled by parent)
+     *   - ExtraDataArgs struct (160 bytes)
      */
     function _postInteraction(
         IOrderMixin.Order calldata order,
@@ -73,38 +79,20 @@ contract EscrowFactory is IEscrowFactory, BaseExtension, MultiVMResolverExtensio
         uint256 remainingMakingAmount,
         bytes calldata extraData
     ) internal override(BaseExtension, MultiVMResolverExtension) {
-        // First handle MultiVM tracking
-        MultiVMResolverExtension._postInteraction(
-            order, extension, orderHash, taker, makingAmount, takingAmount, remainingMakingAmount, extraData
+        // First call parent for MultiVM extension logic
+        uint256 superArgsLength = extraData.length - SRC_IMMUTABLES_LENGTH;
+        super._postInteraction(
+            order, extension, orderHash, taker, makingAmount, takingAmount, remainingMakingAmount, extraData[:superArgsLength]
         );
 
-        // Then handle core escrow creation logic
-        _handleEscrowCreation(order, orderHash, taker, makingAmount, takingAmount, remainingMakingAmount, extraData);
-    }
-
-    /**
-     * @notice Core escrow creation logic extracted from BaseEscrowFactory
-     */
-    function _handleEscrowCreation(
-        IOrderMixin.Order calldata order,
-        bytes32 orderHash,
-        address taker,
-        uint256 makingAmount,
-        uint256 takingAmount,
-        uint256 remainingMakingAmount,
-        bytes calldata extraData
-    ) internal {
-        // Parse extraData to get escrow parameters
-        uint256 superArgsLength = extraData.length - SRC_IMMUTABLES_LENGTH;
-        
+        // Parse ExtraDataArgs from the end of extraData
         ExtraDataArgs calldata extraDataArgs;
         assembly ("memory-safe") {
             extraDataArgs := add(extraData.offset, superArgsLength)
         }
 
+        // Handle hashlock (single secret or merkle tree)
         bytes32 hashlock;
-
-        // Handle multiple fills if enabled
         if (MakerTraitsLib.allowMultipleFills(order.makerTraits)) {
             uint256 partsAmount = uint256(extraDataArgs.hashlockInfo) >> 240;
             if (partsAmount < 2) revert InvalidSecretsAmount();
@@ -118,7 +106,7 @@ contract EscrowFactory is IEscrowFactory, BaseExtension, MultiVMResolverExtensio
             hashlock = extraDataArgs.hashlockInfo;
         }
 
-        // Create immutables for source escrow
+        // Create immutables for source chain escrow
         IBaseEscrow.Immutables memory immutables = IBaseEscrow.Immutables({
             orderHash: orderHash,
             hashlock: hashlock,
@@ -126,26 +114,33 @@ contract EscrowFactory is IEscrowFactory, BaseExtension, MultiVMResolverExtensio
             taker: Address.wrap(uint160(taker)),
             token: order.makerAsset,
             amount: makingAmount,
-            safetyDeposit: extraDataArgs.deposits >> 128,
+            safetyDeposit: extraDataArgs.deposits >> 128, // Upper 128 bits
             timelocks: extraDataArgs.timelocks.setDeployedAt(block.timestamp)
         });
 
+        // Create destination chain complement data
         DstImmutablesComplement memory immutablesComplement = DstImmutablesComplement({
             maker: order.receiver.get() == address(0) ? order.maker : order.receiver,
             amount: takingAmount,
             token: extraDataArgs.dstToken,
-            safetyDeposit: extraDataArgs.deposits & type(uint128).max,
+            safetyDeposit: extraDataArgs.deposits & type(uint128).max, // Lower 128 bits
             chainId: extraDataArgs.dstChainId
         });
 
+        // Emit event for off-chain processing
         emit SrcEscrowCreated(immutables, immutablesComplement);
 
-        // Deploy the source escrow
+        // Actually deploy the escrow contract
         bytes32 salt = immutables.hashMem();
         address escrow = _deployEscrow(salt, 0, ESCROW_SRC_IMPLEMENTATION);
         
-        // Validate escrow has sufficient balance
-        if (escrow.balance < immutables.safetyDeposit || IERC20(order.makerAsset.get()).balanceOf(escrow) < makingAmount) {
+        // Validate that the escrow has sufficient deposits
+        if (escrow.balance < immutables.safetyDeposit) {
+            revert InsufficientEscrowBalance();
+        }
+        
+        // Validate that the escrow has the correct token amount
+        if (IERC20(order.makerAsset.get()).safeBalanceOf(escrow) < makingAmount) {
             revert InsufficientEscrowBalance();
         }
     }
@@ -163,7 +158,6 @@ contract EscrowFactory is IEscrowFactory, BaseExtension, MultiVMResolverExtensio
 
         IBaseEscrow.Immutables memory immutables = dstImmutables;
         immutables.timelocks = immutables.timelocks.setDeployedAt(block.timestamp);
-        
         // Check that the escrow cancellation will start not later than the cancellation time on the source chain.
         if (immutables.timelocks.get(TimelocksLib.Stage.DstCancellation) > srcCancellationTimestamp) revert InvalidCreationTime();
 
@@ -201,9 +195,6 @@ contract EscrowFactory is IEscrowFactory, BaseExtension, MultiVMResolverExtensio
         escrow = implementation.cloneDeterministic(salt, value);
     }
 
-    /**
-     * @notice Validates partial fill logic for multiple fills
-     */
     function _isValidPartialFill(
         uint256 makingAmount,
         uint256 remainingMakingAmount,

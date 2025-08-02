@@ -6,18 +6,16 @@ import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol"
 import { IOrderMixin } from "limit-order-protocol/contracts/interfaces/IOrderMixin.sol";
 import { Address, AddressLib } from "solidity-utils/contracts/libraries/AddressLib.sol";
 
-import { BaseExtension } from "limit-order-settlement/contracts/extensions/BaseExtension.sol";
-import { ExtensionLib } from "limit-order-settlement/contracts/extensions/ExtensionLib.sol";
+import { BaseExtension } from "./BaseExtension.sol";
 
 /**
  * @title Multi-VM Resolver Extension
  * @notice Simplified extension to enable resolvers to work across EVM, SUI, and Aptos chains
- * @dev Streamlined for hackathon demonstration
+ * @dev Streamlined for hackathon
  */
 abstract contract MultiVMResolverExtension is BaseExtension { 
 
-    using AddressLib for Address;
-    using ExtensionLib for bytes;
+    using AddressLib for Address; 
 
     // Supported VM types
     enum VMType { EVM, SUI, APTOS }
