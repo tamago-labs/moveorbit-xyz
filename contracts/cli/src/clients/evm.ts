@@ -1,8 +1,8 @@
-import { createWalletClient, createPublicClient, http, parseEther, formatEther, getContract } from 'viem';
+import { createWalletClient, createPublicClient, http, parseEther, formatEther, getContract, keccak256 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { sepolia, arbitrumSepolia } from 'viem/chains';
 import { EVM_NETWORKS, type SupportedChain, isEvmChain } from '../config/networks';
-import { CONTRACT_ADDRESSES, MOCK_USDC_ABI, LIMIT_ORDER_PROTOCOL_ABI } from '../config/contracts';
+import { CONTRACT_ADDRESSES, MOCK_USDC_ABI, LIMIT_ORDER_PROTOCOL_ABI, RESOLVER_ABI } from '../config/contracts';
 import { logger } from '../utils/logger';
 
 // Function to get Avalanche Fuji chain config at runtime
@@ -265,5 +265,119 @@ export class EVMClient {
     const vs = '0x' + (vNum - 27 === 1 ? '8' : '0') + s.slice(1);
 
     return { r, vs };
+  }
+
+  static async processSimpleSwap(
+    chain: SupportedChain,
+    order: any,
+    signature: { r: string; vs: string }
+  ): Promise<string> {
+    const client = await this.getClient(chain, 'resolver');
+    
+    const resolverContract = getContract({
+      address: CONTRACT_ADDRESSES[chain].resolver as `0x${string}`,
+      abi: RESOLVER_ABI,
+      client: client.walletClient,
+    });
+
+    logger.info('Processing simple EVM swap...');
+
+    const hash = await resolverContract.write.processSimpleSwap([
+      order,
+      signature.r as `0x${string}`,
+      signature.vs as `0x${string}`,
+    ]);
+
+    logger.info(`Simple swap transaction submitted: ${hash}`);
+    
+    const receipt = await client.publicClient.waitForTransactionReceipt({
+      hash,
+      confirmations: 2,
+    });
+
+    logger.info(`Simple swap confirmed in block ${receipt.blockNumber}`);
+    return hash;
+  }
+
+  static async submitOrderAndSecret(
+    chain: SupportedChain,
+    orderHash: string,
+    secret: string
+  ): Promise<string> {
+    const client = await this.getClient(chain, 'resolver');
+    
+    const resolverContract = getContract({
+      address: CONTRACT_ADDRESSES[chain].resolver as `0x${string}`,
+      abi: RESOLVER_ABI,
+      client: client.walletClient,
+    });
+
+    // FIXED: Convert string secret to bytes32 first, then calculate secretHash
+    // Step 1: Convert secret string to bytes32 (like keccak256("user_secret"))
+    const secretBytes32 = keccak256(Buffer.from(secret, 'utf8'));
+    
+    // Step 2: Calculate secretHash as keccak256(abi.encodePacked(secret)) where secret is bytes32
+    // In Solidity: keccak256(abi.encodePacked(secret)) where secret is bytes32
+    // In viem: we need to encode the bytes32 value and then hash it
+    const secretHash = keccak256(secretBytes32);
+
+    logger.info('Submitting order and secret to EVM resolver...');
+    logger.info(`Secret string: ${secret}`);
+    logger.info(`Secret bytes32: ${secretBytes32}`);
+    logger.info(`Secret hash: ${secretHash}`);
+
+    const hash = await resolverContract.write.submitOrderAndSecret([
+      orderHash as `0x${string}`,
+      secretHash as `0x${string}`,
+      secretBytes32 as `0x${string}`,
+    ]);
+
+    logger.info(`Secret submission transaction: ${hash}`);
+    
+    const receipt = await client.publicClient.waitForTransactionReceipt({
+      hash,
+      confirmations: 1,
+    });
+
+    logger.info(`Secret submission confirmed in block ${receipt.blockNumber}`);
+    return hash;
+  }
+
+  static async processCrossChainSwap(
+    chain: SupportedChain,
+    order: any,
+    signature: { r: string; vs: string },
+    dstVM: number,
+    dstChainId: number,
+    dstAddress: string
+  ): Promise<string> {
+    const client = await this.getClient(chain, 'resolver');
+    
+    const resolverContract = getContract({
+      address: CONTRACT_ADDRESSES[chain].resolver as `0x${string}`,
+      abi: RESOLVER_ABI,
+      client: client.walletClient,
+    });
+
+    logger.info(`Processing cross-chain swap: ${chain} → ${dstVM === 1 ? 'SUI' : 'APTOS'}`);
+
+    const hash = await resolverContract.write.processSwap([
+      order,
+      signature.r as `0x${string}`,
+      signature.vs as `0x${string}`,
+      dstVM,
+      BigInt(dstChainId),
+      dstAddress,
+    ]);
+
+    logger.info(`Cross-chain swap transaction submitted: ${hash}`);
+    
+    const receipt = await client.publicClient.waitForTransactionReceipt({
+      hash,
+      confirmations: 2,
+    });
+
+    logger.info(`Cross-chain swap confirmed in block ${receipt.blockNumber}`);
+    return hash;
   }
 }
