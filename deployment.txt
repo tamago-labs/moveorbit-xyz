@@ -2,14 +2,17 @@ Ethereum Sepolia
 ================================================
 
 MockUSDC: 0xAF4E836b7a1f20F1519cc82529Db54c62b02E93c 
+LimitOrderProtocol: 0x0d249716de3bE97a865Ff386Aa8A42428CB97347
 
 
 Avalanche Fuji
 ================================================
 
 MockUSDC: 0x959C3Bcf9AedF4c22061d8f935C477D9E47f02CA 
+LimitOrderProtocol: 0xdeA78063434EdCc56a58B52149d66A283FE0021C
 
 Arbitrum Sepolia
 ================================================
 
 MockUSDC: 0x5F7392Ec616F829Ab54092e7F167F518835Ac740
+LimitOrderProtocol: 0xCeB75a9a4Af613afd42BD000893eD16fB1F0F057
