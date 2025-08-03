@@ -1,207 +1,269 @@
-import { createWalletClient, createPublicClient, http, PublicClient, WalletClient, Account, defineChain } from 'viem';
+import { createWalletClient, createPublicClient, http, parseEther, formatEther, getContract } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { NetworkConfig } from '../config/networks';
+import { sepolia, arbitrumSepolia } from 'viem/chains';
+import { EVM_NETWORKS, type SupportedChain, isEvmChain } from '../config/networks';
+import { CONTRACT_ADDRESSES, MOCK_USDC_ABI, LIMIT_ORDER_PROTOCOL_ABI } from '../config/contracts';
 import { logger } from '../utils/logger';
 
-export class EvmWalletClient {
-  private publicClient: PublicClient;
-  private walletClient: WalletClient;
-  private account: Account;
-  private network: NetworkConfig;
+// Function to get Avalanche Fuji chain config at runtime
+function getAvalancheFujiChain() {
+  return {
+    id: 43113,
+    name: 'Avalanche Fuji',
+    network: 'avalanche-fuji',
+    nativeCurrency: {
+      decimals: 18,
+      name: 'AVAX',
+      symbol: 'AVAX',
+    },
+    rpcUrls: {
+      default: {
+        http: [process.env.AVALANCHE_FUJI_RPC || 'https://api.avax-test.network/ext/bc/C/rpc'],
+      },
+    },
+    blockExplorers: {
+      default: { name: 'SnowTrace', url: 'https://testnet.snowtrace.io' },
+    },
+    testnet: true,
+  } as const;
+}
 
-  constructor(privateKey: string, network: NetworkConfig) {
-    this.network = network;
+export interface EVMWalletClient {
+  account: any;
+  walletClient: any;
+  publicClient: any;
+  chain: SupportedChain;
+  address: string;
+}
+
+export class EVMClient {
+  private static instances: Map<string, EVMWalletClient> = new Map();
+
+  static async getClient(chain: SupportedChain, userType: 'user' | 'resolver'): Promise<EVMWalletClient> {
+    if (!isEvmChain(chain)) {
+      throw new Error(`${chain} is not an EVM chain`);
+    }
+
+    const cacheKey = `${chain}-${userType}`;
     
-    try {
-      // Create account from private key
-      this.account = privateKeyToAccount(privateKey as `0x${string}`);
-      
-      // Define custom chain for viem
-      const chain = defineChain({
-        id: network.chainId,
-        name: network.name,
-        nativeCurrency: network.nativeCurrency,
-        rpcUrls: {
-          default: { http: [network.rpcUrl] },
-        },
-        blockExplorers: {
-          default: { name: 'Explorer', url: network.blockExplorer },
-        },
-      });
-
-      // Create clients
-      this.publicClient = createPublicClient({
-        chain,
-        transport: http(network.rpcUrl),
-      });
-
-      this.walletClient = createWalletClient({
-        account: this.account,
-        chain,
-        transport: http(network.rpcUrl),
-      });
-
-      logger.debug(`EVM wallet initialized for ${network.displayName}`, { 
-        address: this.account.address,
-        chainId: network.chainId 
-      });
-    } catch (error) {
-      throw new Error(`Failed to initialize EVM wallet for ${network.displayName}: ${error}`);
+    if (this.instances.has(cacheKey)) {
+      return this.instances.get(cacheKey)!;
     }
-  }
 
-  getAddress(): string {
-    return this.account.address;
-  }
-
-  getAccount(): Account {
-    return this.account;
-  }
-
-  getPublicClient(): PublicClient {
-    return this.publicClient;
-  }
-
-  getWalletClient(): WalletClient {
-    return this.walletClient;
-  }
-
-  getNetwork(): NetworkConfig {
-    return this.network;
-  }
-
-  async getBalance(): Promise<bigint> {
-    try {
-      const balance = await this.publicClient.getBalance({
-        address: this.account.address,
-      });
-      return balance;
-    } catch (error) {
-      logger.error(`Failed to get balance on ${this.network.displayName}`, error);
-      return 0n;
+    const privateKeyEnv = userType === 'user' ? 'USER_EVM_PRIVATE_KEY' : 'RESOLVER_EVM_PRIVATE_KEY';
+    const privateKey = process.env[privateKeyEnv];
+    
+    if (!privateKey) {
+      throw new Error(`Missing ${privateKeyEnv} in environment variables`);
     }
-  }
 
-  async getTokenBalance(tokenAddress: string, abi: any): Promise<bigint> {
-    try {
-      const balance = await this.publicClient.readContract({
-        address: tokenAddress as `0x${string}`,
-        abi,
-        functionName: 'balanceOf',
-        args: [this.account.address],
-      });
-      return balance as bigint;
-    } catch (error) {
-      logger.error(`Failed to get token balance on ${this.network.displayName}`, error);
-      return 0n;
+    const account = privateKeyToAccount(privateKey as `0x${string}`);
+    const networkConfig = EVM_NETWORKS[chain];
+    
+    // Get the appropriate chain object at runtime
+    let chainObject;
+    switch (chain) {
+      case 'eth-sepolia':
+        chainObject = sepolia;
+        break;
+      case 'avax-fuji':
+        chainObject = getAvalancheFujiChain();
+        break;
+      case 'arb-sepolia':
+        chainObject = arbitrumSepolia;
+        break;
+      default:
+        throw new Error(`Unsupported chain: ${chain}`);
     }
+
+    const publicClient = createPublicClient({
+      chain: chainObject,
+      transport: http(networkConfig.rpcUrl),
+    });
+
+    const walletClient = createWalletClient({
+      account,
+      chain: chainObject,
+      transport: http(networkConfig.rpcUrl),
+    });
+
+    const client = {
+      account,
+      walletClient,
+      publicClient,
+      chain,
+      address: account.address,
+    };
+
+    this.instances.set(cacheKey, client);
+    return client;
   }
 
-  async getTokenDecimals(tokenAddress: string, abi: any): Promise<number> {
-    try {
-      const decimals = await this.publicClient.readContract({
-        address: tokenAddress as `0x${string}`,
-        abi,
-        functionName: 'decimals',
-      });
-      return decimals as number;
-    } catch (error) {
-      logger.error(`Failed to get token decimals on ${this.network.displayName}`, error);
-      return 18;
-    }
+  static async getBalance(chain: SupportedChain, userType: 'user' | 'resolver'): Promise<{
+    native: string;
+    usdc: string;
+  }> {
+    const client = await this.getClient(chain, userType);
+    
+    // Get native token balance
+    const nativeBalance = await client.publicClient.getBalance({
+      address: client.address,
+    });
+
+    // Get USDC balance
+    const usdcContract = getContract({
+      address: CONTRACT_ADDRESSES[chain].mockUSDC as `0x${string}`,
+      abi: MOCK_USDC_ABI,
+      client: client.publicClient,
+    });
+
+    const usdcBalance = await usdcContract.read.balanceOf([client.address]);
+    const decimals = await usdcContract.read.decimals();
+
+    return {
+      native: formatEther(nativeBalance),
+      usdc: (Number(usdcBalance) / Math.pow(10, Number(decimals))).toString(),
+    };
   }
 
-  async sendTransaction(params: {
-    to: string;
-    value?: bigint;
-    data?: string;
-  }) {
-    try {
-      const hash = await this.walletClient.sendTransaction({
-        to: params.to as `0x${string}`,
-        value: params.value || 0n,
-        data: params.data as `0x${string}`,
-      });
-      
-      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
-      return receipt;
-    } catch (error) {
-      logger.error(`Failed to send transaction on ${this.network.displayName}`, error);
-      throw error;
-    }
+  static async mintUSDC(chain: SupportedChain, userType: 'user' | 'resolver', amount: string): Promise<string> {
+    const client = await this.getClient(chain, userType);
+    
+    const usdcContract = getContract({
+      address: CONTRACT_ADDRESSES[chain].mockUSDC as `0x${string}`,
+      abi: MOCK_USDC_ABI,
+      client: client.walletClient,
+    });
+
+    const decimals = await usdcContract.read.decimals();
+    const amountWithDecimals = BigInt(parseFloat(amount) * Math.pow(10, Number(decimals)));
+
+    logger.info(`Minting ${amount} USDC to ${client.address} on ${chain}`);
+
+    const hash = await usdcContract.write.mint([
+      client.address,
+      amountWithDecimals,
+    ]);
+
+    logger.info(`Transaction submitted: ${hash}`);
+    
+    // Wait for confirmation
+    const receipt = await client.publicClient.waitForTransactionReceipt({
+      hash,
+      confirmations: 2,
+    });
+
+    logger.info(`Transaction confirmed in block ${receipt.blockNumber}`);
+    return hash;
   }
 
-  async writeContract(params: {
-    address: string;
-    abi: any;
-    functionName: string;
-    args?: any[];
-    value?: bigint;
-  }) {
-    try {
-      const hash = await this.walletClient.writeContract({
-        address: params.address as `0x${string}`,
-        abi: params.abi,
-        functionName: params.functionName,
-        args: params.args || [],
-        value: params.value,
-      });
-      
-      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
-      return receipt;
-    } catch (error) {
-      logger.error(`Failed to write contract on ${this.network.displayName}`, error);
-      throw error;
-    }
+  static async approveUSDC(
+    chain: SupportedChain, 
+    userType: 'user' | 'resolver', 
+    spender: string, 
+    amount: string
+  ): Promise<string> {
+    const client = await this.getClient(chain, userType);
+    
+    const usdcContract = getContract({
+      address: CONTRACT_ADDRESSES[chain].mockUSDC as `0x${string}`,
+      abi: MOCK_USDC_ABI,
+      client: client.walletClient,
+    });
+
+    const decimals = await usdcContract.read.decimals();
+    const amountWithDecimals = amount === 'max' 
+      ? BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
+      : BigInt(parseFloat(amount) * Math.pow(10, Number(decimals)));
+
+    logger.info(`Approving ${amount} USDC for ${spender} on ${chain}`);
+
+    const hash = await usdcContract.write.approve([
+      spender as `0x${string}`,
+      amountWithDecimals,
+    ]);
+
+    logger.info(`Approval transaction submitted: ${hash}`);
+    
+    const receipt = await client.publicClient.waitForTransactionReceipt({
+      hash,
+      confirmations: 1,
+    });
+
+    logger.info(`Approval confirmed in block ${receipt.blockNumber}`);
+    return hash;
   }
 
-  async estimateGas(params: {
-    to: string;
-    data?: string;
-    value?: bigint;
-  }): Promise<bigint> {
-    try {
-      const gas = await this.publicClient.estimateGas({
-        account: this.account,
-        to: params.to as `0x${string}`,
-        data: params.data as `0x${string}`,
-        value: params.value,
-      });
-      return gas;
-    } catch (error) {
-      logger.error(`Failed to estimate gas on ${this.network.displayName}`, error);
-      return 100000n;
-    }
+  static async createOrder(chain: SupportedChain, params: {
+    maker: string;
+    receiver: string;
+    makerAsset: string;
+    takerAsset: string;
+    makingAmount: string;
+    takingAmount: string;
+    salt?: string;
+  }): Promise<any> {
+    const client = await this.getClient(chain, 'user');
+    
+    const lopContract = getContract({
+      address: CONTRACT_ADDRESSES[chain].limitOrderProtocol as `0x${string}`,
+      abi: LIMIT_ORDER_PROTOCOL_ABI,
+      client: client.publicClient,
+    });
+
+    const decimals = 6; // USDC has 6 decimals
+    const makingAmountWithDecimals = BigInt(parseFloat(params.makingAmount) * Math.pow(10, decimals));
+    const takingAmountWithDecimals = BigInt(parseFloat(params.takingAmount) * Math.pow(10, decimals));
+
+    const order = {
+      salt: params.salt ? BigInt(params.salt) : BigInt(Date.now()),
+      maker: params.maker as `0x${string}`,
+      receiver: params.receiver as `0x${string}`,
+      makerAsset: params.makerAsset as `0x${string}`,
+      takerAsset: params.takerAsset as `0x${string}`,
+      makingAmount: makingAmountWithDecimals,
+      takingAmount: takingAmountWithDecimals,
+      makerTraits: BigInt(0),
+    };
+
+    // Get order hash
+    const orderHash = await lopContract.read.hashOrder([order]);
+
+    return {
+      order,
+      orderHash,
+      chain,
+    };
   }
-}
 
-const evmWalletInstances: Map<string, EvmWalletClient> = new Map();
+  static async signOrder(chain: SupportedChain, order: any): Promise<{
+    r: string;
+    vs: string;
+  }> {
+    const client = await this.getClient(chain, 'user');
+    
+    const lopContract = getContract({
+      address: CONTRACT_ADDRESSES[chain].limitOrderProtocol as `0x${string}`,
+      abi: LIMIT_ORDER_PROTOCOL_ABI,
+      client: client.publicClient,
+    });
 
-export function createEvmWallet(network: NetworkConfig): EvmWalletClient {
-  const privateKey = process.env.EVM_PRIVATE_KEY;
-  
-  if (!privateKey) {
-    throw new Error('EVM_PRIVATE_KEY not found in environment variables');
+    const orderHash = await lopContract.read.hashOrder([order]);
+    
+    // Sign the order hash
+    const signature = await client.account.signMessage({
+      message: { raw: orderHash as `0x${string}` },
+    });
+
+    // Parse signature into r and vs format (as used in the test)
+    const r = signature.slice(0, 66); // 0x + 32 bytes
+    const s = signature.slice(66, 130); // 32 bytes
+    const v = signature.slice(130, 132); // 1 byte
+
+    // Convert to vs format (v-27 in high bit + s)
+    const vNum = parseInt(v, 16);
+    const vs = '0x' + (vNum - 27 === 1 ? '8' : '0') + s.slice(1);
+
+    return { r, vs };
   }
-
-  const cacheKey = network.name;
-  
-  if (!evmWalletInstances.has(cacheKey)) {
-    const wallet = new EvmWalletClient(privateKey, network);
-    evmWalletInstances.set(cacheKey, wallet);
-  }
-
-  return evmWalletInstances.get(cacheKey)!;
-}
-
-export function getEvmWallet(networkName: string): EvmWalletClient {
-  const wallet = evmWalletInstances.get(networkName);
-  if (!wallet) {
-    throw new Error(`EVM wallet for ${networkName} not initialized. Call createEvmWallet first.`);
-  }
-  return wallet;
-}
-
-export function getAllEvmWallets(): Map<string, EvmWalletClient> {
-  return evmWalletInstances;
 }

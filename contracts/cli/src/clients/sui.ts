@@ -1,157 +1,315 @@
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { fromHEX } from '@mysten/sui/utils';
 import { Transaction } from '@mysten/sui/transactions';
-import { SuiNetworkConfig } from '../config/networks';
+import { normalizeSuiAddress } from '@mysten/sui/utils';
+import { SUI_NETWORKS, type SupportedChain, isSuiChain } from '../config/networks';
+import { CONTRACT_ADDRESSES } from '../config/contracts';
 import { logger } from '../utils/logger';
 
-export class SuiWalletClient {
-  private client: SuiClient;
-  private keypair: Ed25519Keypair;
-  private address: string;
+export interface SuiWalletClient {
+  keypair: Ed25519Keypair;
+  client: SuiClient;
+  chain: SupportedChain;
+  address: string;
+}
 
-  constructor(privateKey: string, network: SuiNetworkConfig) {
-    this.client = new SuiClient({ url: network.rpcUrl });
+export class SuiClientManager {
+  private static instances: Map<string, SuiWalletClient> = new Map();
+
+  static async getClient(chain: SupportedChain, userType: 'user' | 'resolver'): Promise<SuiWalletClient> {
+    if (!isSuiChain(chain)) {
+      throw new Error(`${chain} is not a SUI chain`);
+    }
+
+    const cacheKey = `${chain}-${userType}`;
     
-    try { 
-      this.keypair = Ed25519Keypair.fromSecretKey(privateKey);
-      this.address = this.keypair.getPublicKey().toSuiAddress();
+    if (this.instances.has(cacheKey)) {
+      return this.instances.get(cacheKey)!;
+    }
+
+    const privateKeyEnv = userType === 'user' ? 'USER_SUI_PRIVATE_KEY' : 'RESOLVER_SUI_PRIVATE_KEY';
+    const privateKey = process.env[privateKeyEnv];
+    
+    if (!privateKey) {
+      throw new Error(`Missing ${privateKeyEnv} in environment variables`);
+    }
+
+    // Create keypair from private key
+    const keypair = Ed25519Keypair.fromSecretKey(privateKey);
+    const address = normalizeSuiAddress(keypair.getPublicKey().toSuiAddress());
+
+    const networkConfig = SUI_NETWORKS[chain];
+    const client = new SuiClient({
+      url: networkConfig.rpcUrl,
+    });
+
+    const walletClient = {
+      keypair,
+      client,
+      chain,
+      address,
+    };
+
+    this.instances.set(cacheKey, walletClient);
+    return walletClient;
+  }
+
+  static async getBalance(chain: SupportedChain, userType: 'user' | 'resolver'): Promise<{
+    sui: string;
+    usdc: string;
+  }> {
+    const client = await this.getClient(chain, userType);
+    
+    try {
+      // Get SUI balance
+      const suiBalance = await client.client.getBalance({
+        owner: client.address,
+        coinType: '0x2::sui::SUI',
+      });
+
+      // Get USDC balance
+      const usdcGlobal = CONTRACT_ADDRESSES[chain].usdcGlobal;
+      let usdcBalance = '0';
       
-      logger.debug('SUI wallet initialized', { address: this.address });
+      if (usdcGlobal) {
+        try {
+          const usdcCoins = await client.client.getCoins({
+            owner: client.address,
+            coinType: `${CONTRACT_ADDRESSES[chain].packageId}::mock_usdc::USDC`,
+          });
+          
+          const totalUsdcBalance = usdcCoins.data.reduce((sum, coin) => {
+            return sum + BigInt(coin.balance);
+          }, BigInt(0));
+          
+          usdcBalance = (Number(totalUsdcBalance) / Math.pow(10, 6)).toString(); // USDC has 6 decimals
+        } catch (usdcError) {
+          logger.debug('No USDC balance found:', usdcError);
+        }
+      }
+
+      return {
+        sui: (Number(suiBalance.totalBalance) / Math.pow(10, 9)).toString(), // SUI has 9 decimals
+        usdc: usdcBalance,
+      };
     } catch (error) {
-      throw new Error(`Failed to initialize SUI wallet: ${error}`);
+      logger.error('Error getting SUI balance:', error);
+      return {
+        sui: '0',
+        usdc: '0',
+      };
     }
   }
 
-  getAddress(): string {
-    return this.address;
-  }
-
-  getClient(): SuiClient {
-    return this.client;
-  }
-
-  getKeypair(): Ed25519Keypair {
-    return this.keypair;
-  }
-
-  async getBalance(): Promise<string> {
-    try {
-      const balance = await this.client.getBalance({
-        owner: this.address,
-      });
-      return balance.totalBalance;
-    } catch (error) {
-      logger.error('Failed to get SUI balance', error);
-      return '0';
+  static async mintUSDC(chain: SupportedChain, userType: 'user' | 'resolver', amount: string): Promise<string> {
+    const client = await this.getClient(chain, userType);
+    
+    const packageId = CONTRACT_ADDRESSES[chain].packageId;
+    const usdcGlobal = CONTRACT_ADDRESSES[chain].usdcGlobal;
+    
+    if (!packageId || !usdcGlobal) {
+      throw new Error(`Missing contract addresses for ${chain}`);
     }
-  }
 
-  async getUSDCBalance(coinType: string): Promise<string> {
-    try {
-      const balance = await this.client.getBalance({
-        owner: this.address,
-        coinType,
-      });
-      return balance.totalBalance;
-    } catch (error) {
-      logger.debug('Failed to get USDC balance', error);
-      return '0';
-    }
-  }
+    const amountWithDecimals = Math.floor(parseFloat(amount) * Math.pow(10, 6)); // USDC has 6 decimals
 
-  async getAllCoins() {
-    try {
-      const coins = await this.client.getAllCoins({
-        owner: this.address,
-      });
-      return coins.data;
-    } catch (error) {
-      logger.error('Failed to get all coins', error);
-      return [];
-    }
-  }
+    logger.info(`Minting ${amount} USDC to ${client.address} on ${chain}`);
 
-  async getObjects() {
-    try {
-      const objects = await this.client.getOwnedObjects({
-        owner: this.address,
-      });
-      return objects.data;
-    } catch (error) {
-      logger.error('Failed to get owned objects', error);
-      return [];
-    }
-  }
+    const tx = new Transaction();
+    
+    // Call the mint function
+    tx.moveCall({
+      target: `${packageId}::mock_usdc::mint`,
+      arguments: [
+        tx.object(usdcGlobal),
+        tx.pure(amountWithDecimals),
+        tx.pure(client.address),
+      ],
+    });
 
-  async signAndExecuteTransaction(tx: Transaction) {
     try {
-      const result = await this.client.signAndExecuteTransaction({
-        signer: this.keypair,
+      const result = await client.client.signAndExecuteTransaction({
+        signer: client.keypair,
         transaction: tx,
         options: {
-          showEvents: true,
           showEffects: true,
-          showObjectChanges: true,
+          showEvents: true,
         },
       });
-      return result;
+
+      logger.info(`Transaction submitted: ${result.digest}`);
+      
+      if (result.effects?.status?.status === 'success') {
+        logger.info(`USDC minted successfully`);
+      } else {
+        logger.error(`Transaction failed:`, result.effects?.status);
+      }
+
+      return result.digest;
     } catch (error) {
-      logger.error('Failed to execute transaction', error);
+      logger.error('Error minting USDC:', error);
       throw error;
     }
   }
 
-  async requestTestTokens(): Promise<boolean> {
+  static async transferSui(
+    chain: SupportedChain, 
+    userType: 'user' | 'resolver', 
+    recipient: string, 
+    amount: string
+  ): Promise<string> {
+    const client = await this.getClient(chain, userType);
+    
+    const amountWithDecimals = Math.floor(parseFloat(amount) * Math.pow(10, 9)); // SUI has 9 decimals
+
+    logger.info(`Transferring ${amount} SUI to ${recipient} on ${chain}`);
+
+    const tx = new Transaction();
+    
+    const coin = tx.splitCoins(tx.gas, [tx.pure(amountWithDecimals)]);
+    tx.transferObjects([coin], tx.pure(recipient));
+
     try {
-      logger.loading('Requesting SUI test tokens...');
-      
-      // SUI testnet faucet
-      const response = await fetch('https://faucet.testnet.sui.io/gas', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const result = await client.client.signAndExecuteTransaction({
+        signer: client.keypair,
+        transaction: tx,
+        options: {
+          showEffects: true,
         },
-        body: JSON.stringify({
-          FixedAmountRequest: {
-            recipient: this.address,
-          },
-        }),
       });
 
-      if (response.ok) {
-        logger.success('SUI test tokens requested successfully');
-        return true;
+      logger.info(`Transfer submitted: ${result.digest}`);
+      
+      if (result.effects?.status?.status === 'success') {
+        logger.info(`SUI transferred successfully`);
       } else {
-        logger.warn('Failed to request SUI test tokens');
-        return false;
+        logger.error(`Transfer failed:`, result.effects?.status);
       }
+
+      return result.digest;
     } catch (error) {
-      logger.error('Error requesting SUI test tokens', error);
-      return false;
+      logger.error('Error transferring SUI:', error);
+      throw error;
     }
   }
-}
 
-let suiWalletInstance: SuiWalletClient | null = null;
+  static async initializeResolver(chain: SupportedChain): Promise<string> {
+    const client = await this.getClient(chain, 'resolver');
+    
+    const packageId = CONTRACT_ADDRESSES[chain].packageId;
+    const escrowFactory = CONTRACT_ADDRESSES[chain].escrowFactory;
+    
+    if (!packageId || !escrowFactory) {
+      throw new Error(`Missing contract addresses for ${chain}`);
+    }
 
-export function createSuiWallet(network: SuiNetworkConfig): SuiWalletClient {
-  const privateKey = process.env.SUI_PRIVATE_KEY;
-  
-  if (!privateKey) {
-    throw new Error('SUI_PRIVATE_KEY not found in environment variables');
+    logger.info(`Initializing resolver on ${chain}`);
+
+    const tx = new Transaction();
+    
+    // Create a new resolver
+    tx.moveCall({
+      target: `${packageId}::interface::create_resolver`,
+      arguments: [
+        tx.pure(escrowFactory),
+      ],
+    });
+
+    try {
+      const result = await client.client.signAndExecuteTransaction({
+        signer: client.keypair,
+        transaction: tx,
+        options: {
+          showEffects: true,
+          showEvents: true,
+        },
+      });
+
+      logger.info(`Resolver initialization submitted: ${result.digest}`);
+      
+      if (result.effects?.status?.status === 'success') {
+        logger.info(`Resolver initialized successfully`);
+      } else {
+        logger.error(`Initialization failed:`, result.effects?.status);
+      }
+
+      return result.digest;
+    } catch (error) {
+      logger.error('Error initializing resolver:', error);
+      throw error;
+    }
   }
 
-  if (!suiWalletInstance) {
-    suiWalletInstance = new SuiWalletClient(privateKey, network);
+  static async submitOrderAndSecret(
+    chain: SupportedChain,
+    resolverAddress: string,
+    orderHash: string,
+    secret: string
+  ): Promise<string> {
+    const client = await this.getClient(chain, 'resolver');
+    
+    const packageId = CONTRACT_ADDRESSES[chain].packageId;
+    
+    if (!packageId) {
+      throw new Error(`Missing package ID for ${chain}`);
+    }
+
+    logger.info(`Submitting order and secret on ${chain}`);
+
+    const tx = new Transaction();
+    
+    // Convert hex strings to byte arrays
+    const orderHashBytes = Array.from((orderHash.startsWith('0x') ? orderHash.slice(2) : orderHash));
+    const secretBytes = Array.from(Buffer.from(secret, 'utf8'));
+
+    tx.moveCall({
+      target: `${packageId}::interface::submit_order_and_secret`,
+      arguments: [
+        tx.object(resolverAddress),
+        tx.pure(orderHashBytes),
+        tx.pure(secretBytes),
+      ],
+    });
+
+    try {
+      const result = await client.client.signAndExecuteTransaction({
+        signer: client.keypair,
+        transaction: tx,
+        options: {
+          showEffects: true,
+          showEvents: true,
+        },
+      });
+
+      logger.info(`Order and secret submitted: ${result.digest}`);
+      
+      if (result.effects?.status?.status === 'success') {
+        logger.info(`Order and secret submitted successfully`);
+      } else {
+        logger.error(`Submission failed:`, result.effects?.status);
+      }
+
+      return result.digest;
+    } catch (error) {
+      logger.error('Error submitting order and secret:', error);
+      throw error;
+    }
   }
 
-  return suiWalletInstance;
-}
-
-export function getSuiWallet(): SuiWalletClient {
-  if (!suiWalletInstance) {
-    throw new Error('SUI wallet not initialized. Call createSuiWallet first.');
+  static async getGasCoins(chain: SupportedChain, userType: 'user' | 'resolver', amount: number = 1): Promise<void> {
+    const client = await this.getClient(chain, userType);
+    
+    logger.info(`Getting ${amount} SUI from faucet for ${client.address}`);
+    
+    try {
+      // Note: In a real implementation, you'd integrate with SUI faucet API
+      // For now, we just log that this would request from faucet
+      logger.info(`Please request SUI from faucet manually:`);
+      logger.info(`Address: ${client.address}`);
+      logger.info(`Faucet: https://discord.com/channels/916379725201563759/971488439931392130`);
+    } catch (error) {
+      logger.error('Error requesting from faucet:', error);
+      throw error;
+    }
   }
-  return suiWalletInstance;
 }
