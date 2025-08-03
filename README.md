@@ -143,13 +143,69 @@ aptos move build
 aptos move test
 ```
 
-### 4. Runs CLI
+### 4. Run CLI
 
 Navigate back to the root then
 
 ```
 npm run dev
 ```
+
+## Deployments
+
+### Ethereum Sepolia
+
+| Contract            | Address                                      |
+|---------------------|----------------------------------------------|
+| MockUSDC            | `0xAF4E836b7a1f20F1519cc82529Db54c62b02E93c` |
+| LimitOrderProtocol  | `0x0d249716de3bE97a865Ff386Aa8A42428CB97347` |
+| EscrowFactory       | `0x9304F30b1AEfeCB43F86fd5841C6ea75BD0F2529` |
+| EscrowSrc           | `0x12ED717099C8bEfB6aaD60Da0FB13C945Fe770e0` |
+| EscrowDst           | `0xEBD8929a2B50F0b92ee8caC4988C98fC49EC2ebC` |
+| Resolver            | `0x6ee904a0Ff97b5682E80660Bf2Aca280D18aB5F3` |
+
+---
+
+### Avalanche Fuji
+
+| Contract            | Address                                      |
+|---------------------|----------------------------------------------|
+| MockUSDC            | `0x959C3Bcf9AedF4c22061d8f935C477D9E47f02CA` |
+| LimitOrderProtocol  | `0xdeA78063434EdCc56a58B52149d66A283FE0021C` |
+| EscrowFactory       | `0x681f60a2E07Bf4d6b8AE429E6Af3dF3CA18654F2` |
+| EscrowSrc           | `0x63F31AEFd98801A553c1eFCe8aEBaeb73F8094D3` |
+| EscrowDst           | `0x52417373805c6E284107D03603FBdB9c577c377e` |
+| Resolver            | `0xE88CF1EF7F929e9e22Ed058B0e4453A9BA9709b8` |
+
+---
+
+### Arbitrum Sepolia
+
+| Contract            | Address                                      |
+|---------------------|----------------------------------------------|
+| MockUSDC            | `0x5F7392Ec616F829Ab54092e7F167F518835Ac740` |
+| LimitOrderProtocol  | `0xCeB75a9a4Af613afd42BD000893eD16fB1F0F057` |
+| EscrowFactory       | `0xF0b8eaEeBe416Ec43f79b0c83CCc5670d2b7C3Db` |
+| EscrowSrc           | `0x6Ab31A722D4dB2b540D76e8354438366efda8693` |
+| EscrowDst           | `0x06BC3280fBc8993ba5F7F65b82bF811D1Ac08740` |
+| Resolver            | `0xe03dFA1B78e5A25a06b67C73f32f3C8739ADba7c` |
+
+---
+
+### Sui Testnet
+
+| Contract Name             | Address                                                              |
+|---------------------------|----------------------------------------------------------------------|
+| PackageID                 | `0x6d956f92fd7c8a791643df6b6a7e0cb78b94d36524a99822a2ef2ac0f2227aaa` |
+| mock_usdc::USDCGlobal     | `0x5ba29a4014f08697d2045e2e7a62be3f06314694779d7bab2fea023ab086c188` |
+| escrow_factory::ResolverRegistry | `0x4fc09dac9213bdc785015d167de81ffc34a23a419721e555a4624ed16d2c1bc5` |
+| escrow_factory::EscrowFactory | `0xf29bea78c3b4f6b1c0cea9d85ffa6b080863c0c2a064fe7a6e59c945da742d09` |
+
+---
+
+### Aptos
+
+Aptos contracts are not yet deployed.
 
 
 ## License
