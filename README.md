@@ -83,3 +83,75 @@ When a swap is executed, the extension parses `extraData` to determine the desti
    ```
 
 
+## Getting Started
+
+### **Prerequisites**
+- Node.js 18+
+- Foundry, SUI CLI, Aptos CLI
+
+### 1. Install Dependencies
+```bash
+git clone https://github.com/tamago-labs/moveorbit-xyz
+cd moveorbit-xyz
+npm install
+```
+
+### 2. Configure Environment
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and add your private keys:
+```bash
+# Private Keys (Required)
+USER_SUI_PRIVATE_KEY=
+USER_EVM_PRIVATE_KEY=
+RESOLVER_SUI_PRIVATE_KEY=
+RESOLVER_EVM_PRIVATE_KEY=
+
+# RPC URLs
+ETHEREUM_SEPOLIA_RPC=
+AVALANCHE_FUJI_RPC=
+ARBITRUM_SEPOLIA_RPC=
+SUI_TESTNET_RPC=
+```
+
+### 3. (Optional) Run Tests
+
+for EVM
+
+```
+cd contracts/evm
+yarn install
+forge build
+forge test
+```
+
+For SUI
+
+```
+cd contracts/sui
+sui move build
+sui move test
+```
+
+For Aptos
+
+```
+cd contracts/aptos
+aptos move build
+aptos move test
+```
+
+### 4. Runs CLI
+
+Navigate back to the root then
+
+```
+npm run dev
+```
+
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
