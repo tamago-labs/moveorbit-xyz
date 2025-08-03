@@ -2,7 +2,7 @@
 
 // Mock USDC coins in fungible asset
 
-module cross_chain_swap_addr::mock_usdc_fa {
+module cross_chain_swap_addr::mock_usdc {
 
     use aptos_framework::object;
     use aptos_framework::fungible_asset::{ Metadata};
