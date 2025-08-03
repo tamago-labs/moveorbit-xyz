@@ -42,7 +42,7 @@ interface ILimitOrderProtocol {
 }
 
 /**
- * @title Enhanced Resolver contract for cross-chain swap with multi-VM support
+ * @title Resolver contract for cross-chain swap with multi-VM support
  * @notice Supports EVM, SUI, and APTOS cross-chain swaps with secret management
  * @dev Implements all functions referenced in the flow documentation
  */
@@ -294,7 +294,7 @@ contract Resolver is Ownable {
     }
 
     /**
-     * @notice Make arbitrary calls (original function)
+     * @notice Make arbitrary calls  
      */
     function arbitraryCalls(address[] calldata targets, bytes[] calldata arguments) external onlyOwner {
         uint256 length = targets.length;
