@@ -1,0 +1,17 @@
+[package]
+name = "cross_chain_swap"
+version = "1.0.0"
+authors = []
+
+[addresses]
+cross_chain_swap_addr = "e464ab605d217901ece1776c8ea7d74ae8f4a6f05081cc4e2fc19e2b25d749f6"
+aptos_fungible_asset = "0xA"
+
+[dev-addresses]
+
+[dependencies.AptosFramework]
+git = "https://github.com/aptos-labs/aptos-framework.git"
+rev = "testnet"
+subdir = "aptos-framework"
+
+[dev-dependencies]
