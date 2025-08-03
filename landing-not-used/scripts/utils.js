@@ -8,18 +8,10 @@ const { privateKeyToAccount } = require('viem/accounts');
 
 require('dotenv').config();
  
-
 // 1inch router address  
 const AGGREGATION_ROUTER_V6 = '0x111111125421cA6dc452d289314280a0f8842A65';
 const MAX_UINT256 = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
-
-// Polling configuration for order monitoring
-const POLLING_CONFIG = {
-    interval: 2000,           // 2 seconds
-    maxAttempts: 50,          // Maximum polling attempts
-    backoffMultiplier: 1.2    // Exponential backoff multiplier
-};
-
+ 
 // Standard ERC20 ABI for Web3 interactions
 const ERC20_ABI = [
     {
@@ -99,11 +91,11 @@ function validateEnvironment() {
         walletAddress: process.env.WALLET_ADDRESS,
         apiKey: process.env.DEV_PORTAL_KEY,
         rpcUrls: {
-            ethereum: process.env.ETHEREUM_RPC_URL || CHAINS.ethereum.rpcUrl,
-            polygon: process.env.POLYGON_RPC_URL || CHAINS.polygon.rpcUrl,
-            binance: process.env.BINANCE_RPC_URL || CHAINS.binance.rpcUrl,
-            base: process.env.BASE_RPC_URL || CHAINS.base.rpcUrl,
-            arbitrum: process.env.ARBITRUM_RPC_URL || CHAINS.arbitrum.rpcUrl
+            ethereum: process.env.ETHEREUM_RPC_URL,
+            polygon: process.env.POLYGON_RPC_URL,
+            binance: process.env.BINANCE_RPC_URL ,
+            base: process.env.BASE_RPC_URL,
+            arbitrum: process.env.ARBITRUM_RPC_URL
         }
     };
 
@@ -126,32 +118,7 @@ function validateEnvironment() {
     
     return config;
 }
-
-/**
- * Get token address for a specific chain and token symbol
- * @param {string} chainName - Name of the chain
- * @param {string} tokenSymbol - Token symbol (e.g., 'USDC')
- * @returns {string|null} Properly checksummed token address or null if not found
- */
-function getTokenAddress(chainName, tokenSymbol) {
-    const chain = CHAINS[chainName.toLowerCase()];
-    if (!chain || !chain.tokens) {
-        return null;
-    }
-    const address = chain.tokens[tokenSymbol.toUpperCase()];
-    if (!address) {
-        return null;
-    }
-    
-    // Ensure the address is properly checksummed for Viem compatibility
-    try {
-        return ensureValidAddress(address);
-    } catch (error) {
-        console.warn(`Invalid address for ${tokenSymbol} on ${chainName}: ${address}`);
-        return null;
-    }
-}
-
+ 
 /**
  * Format token amount from human readable to wei/smallest unit
  * @param {string} amount - Human readable amount (e.g., "1.5")
@@ -257,16 +224,7 @@ function logSwapParams(params) {
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
-
-/**
- * Get chain configuration by name
- * @param {string} chainName - Chain name
- * @returns {object|null} Chain configuration
- */
-function getChainConfig(chainName) {
-    return CHAINS[chainName.toLowerCase()] || null;
-}
-
+ 
 /**
  * Create hashlock for multiple fills (from Fusion+ SDK pattern)
  * @param {Array<string>} secretHashes - Array of secret hashes
@@ -411,16 +369,7 @@ function createPublic(chainName) {
 function parseTokenAmount(amount, decimals = 18) {
     return parseUnits(amount, decimals).toString();
 }
-
-/**
- * Format token amount for display using Viem
- * @param {string|bigint} amount - Raw token amount
- * @param {number} decimals - Token decimals (default 18)
- * @returns {string} Formatted amount
- */
-function formatTokenAmountViem(amount, decimals = 18) {
-    return formatUnits(BigInt(amount), decimals);
-}
+ 
 
 /**
  * Check token allowance for 1inch router using Viem
@@ -540,86 +489,16 @@ async function estimateGas(publicClient, transaction) {
         return 500000n; // Fallback gas limit
     }
 }
-
-/**
- * Viem Provider Connector Class
- * Provides Viem-specific blockchain interaction methods with Web3-like interface
- */
-class ViemProviderConnector {
-    constructor(privateKey, chainName) {
-        this.privateKey = privateKey;
-        this.chainName = chainName;
-        this.walletClient = createWallet(privateKey, chainName);
-        this.publicClient = createPublic(chainName);
-        this.account = privateKeyToAccount(privateKey);
-    }
-
-    /**
-     * Get token balance using Viem
-     * @param {string} tokenAddress - Token contract address
-     * @param {string} walletAddress - Wallet address
-     * @returns {Promise<bigint>} Balance as bigint
-     */
-    async getTokenBalance(tokenAddress, walletAddress) {
-        return await getTokenBalance(this.publicClient, tokenAddress, walletAddress);
-    }
-
-    /**
-     * Get token decimals using Viem
-     * @param {string} tokenAddress - Token contract address
-     * @returns {Promise<number>} Token decimals
-     */
-    async getTokenDecimals(tokenAddress) {
-        const decimals = await this.publicClient.readContract({
-            address: ensureValidAddress(tokenAddress),
-            abi: [
-                {
-                    name: 'decimals',
-                    type: 'function',
-                    stateMutability: 'view',
-                    inputs: [],
-                    outputs: [{ name: '', type: 'uint8' }]
-                }
-            ],
-            functionName: 'decimals'
-        });
-        return Number(decimals);
-    }
-
-    /**
-     * Check token allowance using Viem
-     * @param {string} tokenAddress - Token contract address
-     * @param {string} ownerAddress - Owner address
-     * @param {string} spenderAddress - Spender address
-     * @returns {Promise<bigint>} Allowance as bigint
-     */
-    async checkTokenApproval(tokenAddress, ownerAddress, spenderAddress) {
-        return await checkAllowance(this.publicClient, tokenAddress, ownerAddress);
-    }
-
-    /**
-     * Approve token spending using Viem
-     * @param {string} tokenAddress - Token contract address
-     * @param {string} spenderAddress - Spender address
-     * @param {string} amount - Amount to approve
-     * @returns {Promise<string>} Transaction hash
-     */
-    async approveToken(tokenAddress, spenderAddress, amount) {
-        return await approveToken(this.walletClient, tokenAddress, amount);
-    }
-}
-
+ 
 function getRandomBytes32() {
     return '0x' + Buffer.from(randomBytes(32)).toString('hex');
 }
 
 
 module.exports = {
-    // Constants
-    CHAINS,
+    // Constants 
     AGGREGATION_ROUTER_V6,
-    MAX_UINT256,
-    POLLING_CONFIG,
+    MAX_UINT256, 
     ERC20_ABI,
     
     // Secret generation
@@ -627,9 +506,7 @@ module.exports = {
     generateMultipleSecrets,
     
     // Environment and configuration
-    validateEnvironment,
-    getTokenAddress,
-    getChainConfig,
+    validateEnvironment, 
     ensureValidAddress,
     
     // Formatting and utilities
@@ -649,18 +526,13 @@ module.exports = {
     
     // Web3 Provider Connector
     Web3ProviderConnector,
-    
-    // ===============================================
-    // VIEM FUNCTIONS (RESTORED)
-    // ===============================================
-    
+      
     // Viem client creation
     createWallet,
     createPublic,
     
     // Viem token utilities
-    parseTokenAmount,
-    formatTokenAmountViem,
+    parseTokenAmount, 
     
     // Viem blockchain interactions
     checkAllowance,
@@ -668,8 +540,6 @@ module.exports = {
     getTokenBalance,
     waitForTransaction,
     estimateGas,
-    
-    // Viem Provider Connector
-    ViemProviderConnector,
+     
     getRandomBytes32
 };

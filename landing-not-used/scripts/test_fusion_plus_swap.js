@@ -3,6 +3,7 @@ const { SDK, HashLock, PrivateKeyProviderConnector, NetworkEnum } = require("@1i
 const { randomBytes } = require('crypto');
 const { Web3 } = require('web3');
 const { solidityPackedKeccak256 } = require('ethers');
+
 require('dotenv').config();
 
 const {
@@ -12,8 +13,7 @@ const {
     logError, 
     formatDuration,
     AGGREGATION_ROUTER_V6,
-    MAX_UINT256,
-    POLLING_CONFIG,
+    MAX_UINT256, 
     getRandomBytes32
 } = require('./utils');
 
