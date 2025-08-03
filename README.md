@@ -151,6 +151,13 @@ Navigate back to the root then
 npm run dev
 ```
 
+## Screenshots
+
+<img width="1294" height="467" alt="Screenshot from 2025-08-03 22-23-26" src="https://github.com/user-attachments/assets/65234f74-5a84-4299-95e2-0cb1d8c828ae" />
+
+<img width="1380" height="623" alt="Screenshot from 2025-08-04 00-03-37" src="https://github.com/user-attachments/assets/4157bb23-798d-4325-8e04-f2bc1449ef5a" />
+
+
 ## Deployments
 
 ### Ethereum Sepolia
