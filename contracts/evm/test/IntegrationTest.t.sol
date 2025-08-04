@@ -159,21 +159,10 @@ contract IntegrationTest is Test {
 
     /**
      * @notice ✅ Flow 2: EVM-to-SUI/APTOS Cross-Chain
-     * User → Signs Order + Secret → Resolver → fillOrderWithPostInteraction() → EscrowFactory.postInteraction() → CrossVMOrder Created
+     * User → Signs Order + Secret → Resolver → LOCKS USER TOKENS → CrossChainSwapProcessed Event
      */
     function testCrossChainSwap() public {
         console.log("Testing Flow 2: EVM-to-SUI/APTOS Cross-Chain");
-        
-        // Ensure fresh tokens for this test
-        usdcSrc.mint(user, SWAP_AMOUNT * 3);
-        usdcDst.mint(resolverOwner, SWAP_AMOUNT * 3);
-        
-        // Refresh approvals
-        vm.prank(user);
-        usdcSrc.approve(address(lop), type(uint256).max);
-        
-        vm.prank(resolverOwner);
-        usdcDst.approve(address(resolver), type(uint256).max);
         
         // User signs order + secret (using unique salt)
         IOrderMixin.Order memory order = createTestOrderWithSalt(block.timestamp + 1000);
@@ -182,21 +171,55 @@ contract IntegrationTest is Test {
         // Setup secret
         bytes32 secret = keccak256("user_secret");
         bytes32 secretHash = keccak256(abi.encodePacked(secret));
+        bytes32 orderHash = lop.hashOrder(order);
         
-        // Resolver owner submits secret 
-        console.log("Testing secret submission...");
-        vm.startPrank(resolverOwner); 
-        resolver.submitOrderAndSecret(lop.hashOrder(order), secretHash, secret);
+        // Resolver owner submits secret first
+        console.log("Submitting secret...");
+        vm.prank(resolverOwner); 
+        resolver.submitOrderAndSecret(orderHash, secretHash, secret);
         console.log("Secret submission successful");
+         
+        console.log("User approving resolver to spend tokens...");
+        vm.prank(user);
+        usdcSrc.approve(address(resolver), SWAP_AMOUNT);
         
-        // Now try the full cross-chain swap 
-        console.log("Testing full cross-chain swap...");
+        // Check initial balances
+        uint256 userSrcBefore = usdcSrc.balanceOf(user);
+        uint256 resolverSrcBefore = usdcSrc.balanceOf(address(resolver));
+        
+        console.log("User USDC balance before:", userSrcBefore);
+        console.log("Resolver USDC balance before:", resolverSrcBefore);
+        
+        // Now process cross-chain swap - this should LOCK user tokens
+        console.log("Processing cross-chain swap...");
         uint8 dstVM = 1; // SUI
         uint256 dstChainId = 12345;
         string memory dstAddress = "0x5678...sui_address"; 
+        
+        vm.expectEmit(true, true, true, true);
+        emit CrossChainSwapProcessed(orderHash, Resolver.VMType.SUI, dstChainId, dstAddress);
+        
+        vm.prank(resolverOwner);
         resolver.processSwap(order, r, vs, dstVM, dstChainId, dstAddress);
-        vm.stopPrank();
-
+        
+        // Verify cross-chain behavior: User tokens are LOCKED
+        uint256 userSrcAfter = usdcSrc.balanceOf(user);
+        uint256 resolverSrcAfter = usdcSrc.balanceOf(address(resolver));
+        
+        console.log("User USDC balance after:", userSrcAfter);
+        console.log("Resolver USDC balance after:", resolverSrcAfter);
+        
+        // Critical assertions: User tokens should be locked in resolver
+        assertEq(userSrcAfter, userSrcBefore - SWAP_AMOUNT, "User tokens should be transferred to resolver");
+        assertEq(resolverSrcAfter, resolverSrcBefore + SWAP_AMOUNT, "Resolver should hold locked user tokens");
+        
+        // Verify locked order is stored
+        (address maker, address token, uint256 amount, , , , , bool completed) = resolver.lockedOrders(orderHash);
+        assertEq(maker, user, "Locked order should have correct maker");
+        assertEq(token, address(usdcSrc), "Locked order should have correct token");
+        assertEq(amount, SWAP_AMOUNT, "Locked order should have correct amount");
+        assertFalse(completed, "Locked order should not be completed yet");
+       
         console.log("Flow 2 completed: EVM-to-SUI Cross-Chain processed successfully!");
     }
 
@@ -206,26 +229,6 @@ contract IntegrationTest is Test {
      */
     function testMultiVMResolverRegistration() public {
         console.log("Testing Flow 3: Multi-VM Resolver Registration");
-        
-        // Ensure fresh tokens for this test  
-        // Reset balances and mint fresh tokens
-        vm.deal(user, 10 ether);
-        vm.deal(resolverOwner, 10 ether);
-        
-        // Mint fresh tokens to both parties
-        usdcSrc.mint(user, SWAP_AMOUNT * 3);           // Extra for user (maker)
-        usdcDst.mint(resolverOwner, SWAP_AMOUNT * 3);   // Extra for resolver owner (taker)
-        
-        // Refresh approvals
-        vm.startPrank(user);
-        usdcSrc.approve(address(lop), type(uint256).max);
-        vm.stopPrank();
-        
-        vm.startPrank(resolverOwner);
-        usdcDst.approve(address(resolver), type(uint256).max);
-        vm.stopPrank();
-        
-        console.log("Fresh tokens minted and approved");
         
         // Resolver registers on multiple VMs
         uint8[] memory vmTypes = new uint8[](3);
@@ -241,16 +244,29 @@ contract IntegrationTest is Test {
         vm.expectEmit(true, true, true, true);
         emit ResolverRegistered(vmTypes, addresses);
         
-        vm.startPrank(resolverOwner);
+        vm.prank(resolverOwner);
         resolver.registerResolver(vmTypes, addresses);
         
-        // Resolver can now process cross-chain orders
+        // Test processing cross-chain orders after registration
         IOrderMixin.Order memory order = createTestOrderWithSalt(block.timestamp + 2000);
         (bytes32 r, bytes32 vs) = signOrder(order, userPrivateKey);
+        bytes32 orderHash = lop.hashOrder(order);
         
-        // vm.prank(resolverOwner);
+        // Setup secret for this order
+        bytes32 secret = keccak256("registration_test_secret");
+        bytes32 secretHash = keccak256(abi.encodePacked(secret));
+        
+        // Submit secret first
+        vm.prank(resolverOwner);
+        resolver.submitOrderAndSecret(orderHash, secretHash, secret);
+        
+        // User approves resolver
+        vm.prank(user);
+        usdcSrc.approve(address(resolver), SWAP_AMOUNT);
+        
+        // Process cross-chain swap to APTOS
+        vm.prank(resolverOwner);
         resolver.processSwap(order, r, vs, 2, 67890, "0x9abc...aptos_address"); // APTOS
-        vm.stopPrank();
         
         console.log("Flow 3 completed: Multi-VM resolver can process cross-chain orders");
     }
