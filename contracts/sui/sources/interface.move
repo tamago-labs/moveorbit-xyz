@@ -17,12 +17,7 @@ module cross_chain_swap::interface {
     const E_UNAUTHORIZED: u64 = 1;
     const E_INVALID_SECRET: u64 = 2;
     const E_ORDER_NOT_FOUND: u64 = 3;
-
-    /// Initialize the cross-chain swap protocol
-    public fun initialize_protocol(ctx: &mut TxContext) {
-        // Create and share factory
-        escrow_factory::test_init(ctx);
-    }
+ 
 
     /// Authorize a resolver to create escrows
     public fun authorize_resolver(

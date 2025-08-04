@@ -28,13 +28,13 @@ contract DeployFactoryAndResolver is Script {
         );
 
         // Deploy Resolver
-        Resolver resolver = new Resolver(factory, LimitOrderProtocol(lopAddress), resolverOwner);
+        // Resolver resolver = new Resolver(factory, LimitOrderProtocol(lopAddress), resolverOwner);
 
         vm.stopBroadcast();
 
         // Log results
         console.log("EscrowFactory deployed at:", address(factory));
-        console.log("Resolver deployed at:", address(resolver));
+        // console.log("Resolver deployed at:", address(resolver));
     }
 
     function _getDeployerKey() internal view returns (uint256) {
